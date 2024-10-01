@@ -68,6 +68,7 @@ class CoreServiceProvider extends PackageServiceProvider
 
     public function setPolicies()
     {
+
         $packages = $this->getPackageNames();
 
         foreach ($packages as $package) {
