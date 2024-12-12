@@ -1,13 +1,34 @@
 <?php
 
-namespace Moox\Core\Traits;
+namespace Moox\Core\Traits\Tabs;
 
 use Filament\Resources\Components\Tab;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Config;
+use Moox\Core\Traits\QueriesInConfig;
 
-trait HasDynamicTabs
+trait TabsInListPage
 {
     use QueriesInConfig;
+
+    public function mountTabsInListPage(): void
+    {
+        static::getResource()::setCurrentTab($this->activeTab);
+    }
+
+    public function updatedActiveTab(): void
+    {
+        static::getResource()::setCurrentTab($this->activeTab);
+        $this->tableFilters = null;
+        $this->tableSortColumn = null;
+        $this->tableSortDirection = null;
+        $this->resetTable();
+    }
+
+    protected function getTableQuery(): Builder
+    {
+        return static::getResource()::getTableQuery($this->activeTab);
+    }
 
     public function getDynamicTabs(string $configKey, string $modelClass): array
     {
