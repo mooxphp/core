@@ -5,7 +5,7 @@ namespace Moox\Core\Traits;
 use Closure;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-trait QueriesInConfig
+trait HasQueriesInConfig
 {
     protected function applyConditions($query, $conditions)
     {

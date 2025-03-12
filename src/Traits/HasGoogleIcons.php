@@ -4,8 +4,11 @@ namespace Moox\Core\Traits;
 
 use Filament\Support\Facades\FilamentIcon;
 
-trait GoogleIcons
+trait HasGoogleIcons
 {
+    /**
+     * Register Google Icons.
+     */
     public function useGoogleIcons(): void
     {
         FilamentIcon::register([

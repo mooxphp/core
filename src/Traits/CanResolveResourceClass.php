@@ -2,8 +2,11 @@
 
 namespace Moox\Core\Traits;
 
-trait ResolveResourceClass
+trait CanResolveResourceClass
 {
+    /**
+     * Resolve the resource class.
+     */
     protected static function resolveResourceClass(): string
     {
         $className = static::class;
@@ -13,6 +16,9 @@ trait ResolveResourceClass
         return class_exists($resourceClass) ? $resourceClass : parent::$resource;
     }
 
+    /**
+     * Get the resource class.
+     */
     public static function getResource(): string
     {
         if (isset(static::$resource)) {

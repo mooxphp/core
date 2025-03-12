@@ -2,7 +2,7 @@
 
 namespace Moox\Core\Traits;
 
-trait TranslatableConfig
+trait HasTranslatableConfig
 {
     /**
      * Translate config values marked with the 'trans//' pattern.
