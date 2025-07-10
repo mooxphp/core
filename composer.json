@@ -17,11 +17,16 @@
         }
     ],
     "require": {
-        "php": "^8.2.0",
-        "spatie/laravel-package-tools": "^1.13.0",
+        "codeat3/blade-google-material-design-icons": "^1.0",
+        "filament/support": "^4.0",
         "laravel/framework": "^11.0|^12.0",
-        "filament/filament": "4.0.0-beta2",
-        "codeat3/blade-google-material-design-icons": "^1.0"
+        "moox/clipboard": "self.version",
+        "moox/progress": "self.version",
+        "php": "^8.2.0",
+        "spatie/laravel-package-tools": "^1.13.0"
+    },
+    "require-dev": {
+        "moox/devtools": "self.version"
     },
     "autoload": {
         "psr-4": {
@@ -73,24 +78,5 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "require-dev": {
-        "laravel/pint": "^1.14",
-        "nunomaduro/collision": "^8.1.1||^7.10.0",
-        "larastan/larastan": "^3.0",
-        "orchestra/testbench": "^9.0.0||^8.22.0",
-        "pestphp/pest": "^3.0",
-        "pestphp/pest-plugin-arch": "^3.0",
-        "pestphp/pest-plugin-laravel": "^3.0",
-        "phpstan/extension-installer": "^1.3",
-        "phpstan/phpstan-deprecation-rules": "^2.0",
-        "phpstan/phpstan-phpunit": "^2.0",
-        "spatie/laravel-ray": "^1.35"
-    },
-    "config": {
-        "allow-plugins": {
-            "pestphp/pest-plugin": true,
-            "phpstan/extension-installer": true
-        }
-    }
+    "prefer-stable": true
 }
