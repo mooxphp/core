@@ -115,14 +115,15 @@ abstract class BaseEditDraft extends EditRecord
 
         return [
             ActionGroup::make(
-                $languages->map(fn ($localization) => Action::make('language_'.$localization->language->alpha2)
-                    ->icon('flag-'.$localization->language->alpha2)
-                    ->label('')
-                    ->color('transparent')
-                    ->extraAttributes(['class' => 'bg-transparent hover:bg-transparent flex items-center gap-1'])
-                    ->url(fn () => $this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $localization->language->alpha2]))
+                $languages->map(
+                    fn ($localization) => Action::make('language_'.$localization->language->alpha2)
+                        ->icon('flag-'.$localization->language->alpha2)
+                        ->label('')
+                        ->color('transparent')
+                        ->extraAttributes(['class' => 'bg-transparent hover:bg-transparent flex items-center gap-1'])
+                        ->url(fn () => $this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $localization->language->alpha2]))
                 )
-                    ->toArray()
+                    ->all()
             )
                 ->color('transparent')
                 ->label('Language')
