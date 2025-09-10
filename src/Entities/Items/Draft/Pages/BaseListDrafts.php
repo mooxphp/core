@@ -8,6 +8,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Model;
 use Moox\Core\Traits\CanResolveResourceClass;
+use Moox\Localization\Models\Localization;
 
 abstract class BaseListDrafts extends ListRecords
 {
@@ -22,7 +23,10 @@ abstract class BaseListDrafts extends ListRecords
     public function mount(): void
     {
         parent::mount();
-        $this->lang = request()->get('lang', app()->getLocale());
+        $defaultLang = Localization::where('is_default', true)
+            ->first()?->language?->alpha2 ?? config('app.locale');
+
+        $this->lang = request()->get('lang', $defaultLang);
     }
 
     public function getTitle(): string

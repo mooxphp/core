@@ -155,13 +155,22 @@ abstract class BaseResource extends Resource
             ->url(function ($record, $livewire) {
                 $viewParams = ['record' => $record];
 
-                // Only include lang parameter if the model supports translations
                 if (method_exists($record, 'translations')) {
                     $currentLang = $livewire->lang ?? request()->query('lang') ?? app()->getLocale();
                     $viewParams['lang'] = $currentLang;
                 }
 
                 return static::getUrl('view', $viewParams);
+            })
+            ->hidden(function ($record, $livewire) {
+                if (method_exists($record, 'translations')) {
+                    $currentLang = $livewire->lang ?? request()->query('lang') ?? app()->getLocale();
+                    $translation = $record->translations()->where('locale', $currentLang)->first();
+
+                    return ! $translation;
+                }
+
+                return false;
             });
     }
 

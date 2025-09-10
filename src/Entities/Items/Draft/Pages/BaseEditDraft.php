@@ -30,8 +30,35 @@ abstract class BaseEditDraft extends EditRecord
         $this->lang = request()->query('lang', app()->getLocale());
         parent::mount($record);
 
-        if ($this->record && method_exists($this->record, 'trashed')) {
+        if ($this->record && method_exists($this->record, 'translations')) {
+            $isAdminContext = request()->is('admin/*') || request()->is('filament/*') ||
+                (isset($this) && method_exists($this, 'getResource'));
+
+            if ($isAdminContext) {
+                $localization = \Moox\Localization\Models\Localization::whereHas('language', function ($q) {
+                    $q->where('alpha2', $this->lang);
+                })->where('is_active_admin', true)->first();
+
+                if (! $localization) {
+                    $defaultLocalization = \Moox\Localization\Models\Localization::where('is_default', true)->first() ?? app()->getLocale();
+                    if ($defaultLocalization) {
+                        $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->language->alpha2]));
+                    } else {
+                        $this->redirect($this->getResource()::getUrl('index'));
+                    }
+                }
+            }
+
             $translation = $this->record->translations()->withTrashed()->where('locale', $this->lang)->first();
+
+            if ($this->record->trashed() && ! $translation) {
+                $defaultLocalization = \Moox\Localization\Models\Localization::where('is_default', true)->first();
+                if ($defaultLocalization) {
+                    $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->language->alpha2]));
+                } else {
+                    $this->redirect($this->getResource()::getUrl('index'));
+                }
+            }
 
             if ($translation && $translation->trashed()) {
                 $this->redirect($this->getResource()::getUrl('view', ['record' => $this->record, 'lang' => $this->lang]));

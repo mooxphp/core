@@ -210,10 +210,22 @@ trait HasResourceTaxonomy
                 ->label($settings['label'] ?? ucfirst($taxonomy))
                 ->multiple()
                 ->options(
-                    function () use ($taxonomyModel) {
+                    function () use ($taxonomyModel, $pivotTable, $foreignKey, $relatedKey, $resourceTable) {
                         $locale = request()->query('lang') ?? app()->getLocale();
 
+                        $usedTaxonomyIds = DB::table($pivotTable)
+                            ->join($resourceTable, $pivotTable.'.'.$foreignKey, '=', $resourceTable.'.id')
+                            ->distinct()
+                            ->pluck($pivotTable.'.'.$relatedKey)
+                            ->filter()
+                            ->toArray();
+
+                        if (empty($usedTaxonomyIds)) {
+                            return [];
+                        }
+
                         return app($taxonomyModel)::query()
+                            ->whereIn('id', $usedTaxonomyIds)
                             ->when(method_exists($taxonomyModel, 'with'), fn ($query) => $query->with('translations'))
                             ->get()
                             ->mapWithKeys(function ($item) use ($locale) {
@@ -255,39 +267,40 @@ trait HasResourceTaxonomy
         $taxonomyService = static::getTaxonomyService();
         $taxonomies = $taxonomyService->getTaxonomies();
 
-        return collect($taxonomies)->map(fn ($settings, $taxonomy): TagsColumn => TagsColumn::make($taxonomy)
-            ->label($settings['label'] ?? ucfirst((string) $taxonomy))
-            ->getStateUsing(function ($record) use ($taxonomy, $taxonomyService, $settings) {
-                $relationshipName = $settings['relationship'] ?? $taxonomy;
-                $table = $taxonomyService->getTaxonomyTable($taxonomy);
-                $foreignKey = $taxonomyService->getTaxonomyForeignKey($taxonomy);
-                $relatedKey = $taxonomyService->getTaxonomyRelatedKey($taxonomy);
-                $modelClass = $taxonomyService->getTaxonomyModel($taxonomy);
+        return collect($taxonomies)->map(
+            fn ($settings, $taxonomy): TagsColumn => TagsColumn::make($taxonomy)
+                ->label($settings['label'] ?? ucfirst((string) $taxonomy))
+                ->getStateUsing(function ($record) use ($taxonomy, $taxonomyService, $settings) {
+                    $relationshipName = $settings['relationship'] ?? $taxonomy;
+                    $table = $taxonomyService->getTaxonomyTable($taxonomy);
+                    $foreignKey = $taxonomyService->getTaxonomyForeignKey($taxonomy);
+                    $relatedKey = $taxonomyService->getTaxonomyRelatedKey($taxonomy);
+                    $modelClass = $taxonomyService->getTaxonomyModel($taxonomy);
 
-                $model = app($modelClass);
-                $modelTable = $model->getTable();
+                    $model = app($modelClass);
+                    $modelTable = $model->getTable();
 
-                $currentLocale = request()->get('lang') ?? app()->getLocale();
+                    $currentLocale = request()->get('lang') ?? app()->getLocale();
 
-                return DB::table($table)
-                    ->join($modelTable, sprintf('%s.%s', $table, $relatedKey), '=', $modelTable.'.id')
-                    ->where(sprintf('%s.%s', $table, $foreignKey), $record->id)
-                    ->when(method_exists($model, 'translations'), function ($query) use ($modelTable, $modelClass, $currentLocale) {
-                        $translationTable = strtolower(class_basename($modelClass)).'_translations';
+                    return DB::table($table)
+                        ->join($modelTable, sprintf('%s.%s', $table, $relatedKey), '=', $modelTable.'.id')
+                        ->where(sprintf('%s.%s', $table, $foreignKey), $record->id)
+                        ->when(method_exists($model, 'translations'), function ($query) use ($modelTable, $modelClass, $currentLocale) {
+                            $translationTable = strtolower(class_basename($modelClass)).'_translations';
 
-                        return $query->leftJoin($translationTable, function ($join) use ($modelTable, $translationTable, $currentLocale, $modelClass) {
-                            $foreignKeyColumn = strtolower(class_basename($modelClass)).'_id';
-                            $join->on($translationTable.'.'.$foreignKeyColumn, '=', $modelTable.'.id')
-                                ->where($translationTable.'.locale', '=', $currentLocale);
-                        })->pluck($translationTable.'.title');
-                    }, function ($query) use ($modelTable) {
-                        return $query->pluck($modelTable.'.title');
-                    })
-                    ->toArray();
-            })
-            ->toggleable(isToggledHiddenByDefault: true)
-            ->separator(',')
-            ->searchable())->toArray();
+                            return $query->leftJoin($translationTable, function ($join) use ($modelTable, $translationTable, $currentLocale, $modelClass) {
+                                $foreignKeyColumn = strtolower(class_basename($modelClass)).'_id';
+                                $join->on($translationTable.'.'.$foreignKeyColumn, '=', $modelTable.'.id')
+                                    ->where($translationTable.'.locale', '=', $currentLocale);
+                            })->pluck($translationTable.'.title');
+                        }, function ($query) use ($modelTable) {
+                            return $query->pluck($modelTable.'.title');
+                        })
+                        ->toArray();
+                })
+                ->toggleable(isToggledHiddenByDefault: true)
+                ->separator(',')
+        )->toArray();
     }
 
     protected static function handleTaxonomies(Model $record, array $data): void

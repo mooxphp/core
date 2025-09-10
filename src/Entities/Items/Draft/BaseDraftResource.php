@@ -418,7 +418,6 @@ class BaseDraftResource extends BaseResource
         return TextColumn::make('translation_status')
             ->label('Status')
             ->sortable()
-            ->searchable()
             ->toggleable()
             ->badge()
             ->formatStateUsing(function ($state) {
