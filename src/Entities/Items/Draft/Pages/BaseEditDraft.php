@@ -8,6 +8,7 @@ use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Moox\Core\Traits\CanResolveResourceClass;
 use Moox\Core\Traits\Taxonomy\HasPagesTaxonomy;
+use Moox\Localization\Models\Localization;
 
 /**
  * @phpstan-type TranslatableModel = Model&TranslatableContract
@@ -27,22 +28,23 @@ abstract class BaseEditDraft extends EditRecord
 
     public function mount($record): void
     {
-        $this->lang = request()->query('lang', app()->getLocale());
+        $defaultLocalization = Localization::where('is_default', true)->first();
+        $defaultLang = $defaultLocalization->locale_variant ?? app()->getLocale();
+
+        $this->lang = request()->query('lang', $defaultLang);
         parent::mount($record);
 
-        if ($this->record && method_exists($this->record, 'translations')) {
-            $isAdminContext = request()->is('admin/*') || request()->is('filament/*') ||
-                (isset($this) && method_exists($this, 'getResource'));
+        if ($this->record && $this->record instanceof Model && method_exists($this->record, 'translations')) {
+            $isAdminContext = request()->is('admin/*') || request()->is('filament/*');
 
             if ($isAdminContext) {
-                $localization = \Moox\Localization\Models\Localization::whereHas('language', function ($q) {
-                    $q->where('alpha2', $this->lang);
-                })->where('is_active_admin', true)->first();
+                $localization = Localization::where('locale_variant', $this->lang)
+                    ->where('is_active_admin', true)->first();
 
                 if (! $localization) {
-                    $defaultLocalization = \Moox\Localization\Models\Localization::where('is_default', true)->first() ?? app()->getLocale();
+                    $defaultLocalization = Localization::where('is_default', true)->first();
                     if ($defaultLocalization) {
-                        $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->language->alpha2]));
+                        $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->locale_variant]));
                     } else {
                         $this->redirect($this->getResource()::getUrl('index'));
                     }
@@ -52,9 +54,9 @@ abstract class BaseEditDraft extends EditRecord
             $translation = $this->record->translations()->withTrashed()->where('locale', $this->lang)->first();
 
             if ($this->record->trashed() && ! $translation) {
-                $defaultLocalization = \Moox\Localization\Models\Localization::where('is_default', true)->first();
+                $defaultLocalization = Localization::where('is_default', true)->first();
                 if ($defaultLocalization) {
-                    $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->language->alpha2]));
+                    $this->redirect($this->getResource()::getUrl('edit', ['record' => $this->record, 'lang' => $defaultLocalization->locale_variant]));
                 } else {
                     $this->redirect($this->getResource()::getUrl('index'));
                 }
@@ -115,7 +117,7 @@ abstract class BaseEditDraft extends EditRecord
 
             if (! $translation) {
                 $translation = $record->translations()->make([
-                    $relation->getForeignKeyName() => $record->id,
+                    $relation->getForeignKeyName() => $record->getKey(),
                     'locale' => $this->lang,
                 ]);
             }
@@ -224,10 +226,38 @@ abstract class BaseEditDraft extends EditRecord
 
         $translation = $this->record->translations()->where('locale', $this->lang)->first();
 
-        if (! $translation) {
-            return $entity.' - '.__('core::core.create');
+        if ($translation && $translation->title) {
+            return $entity.' - '.$translation->title;
         }
 
-        return $entity.' - '.$translation->title;
+        return $entity.' - '.__('core::core.translation_create');
+    }
+
+    public function getHeading(): string
+    {
+        $entity = $this->getResource()::getModelLabel();
+
+        $translation = $this->record->translations()->where('locale', $this->lang)->first();
+
+        if ($translation && $translation->title) {
+            return $entity.' - '.$translation->title;
+        }
+
+        $title = $entity.' - '.__('core::core.translation_create');
+
+        $defaultLocalization = Localization::where('is_default', true)->first();
+        $defaultLang = $defaultLocalization->locale_variant ?? app()->getLocale();
+        $fallbackTranslation = $this->record->translations()->where('locale', $defaultLang)->first();
+
+        if ($fallbackTranslation && $fallbackTranslation->title) {
+            $title .= ' ('.$fallbackTranslation->title.' - '.$defaultLang.')';
+        } else {
+            $anyTranslation = $this->record->translations()->whereNotNull('title')->first();
+            if ($anyTranslation && $anyTranslation->title) {
+                $title .= ' ('.$anyTranslation->title.' - '.$anyTranslation->locale.')';
+            }
+        }
+
+        return $title;
     }
 }

@@ -13,6 +13,7 @@ use Moox\Core\Entities\BaseResource;
 use Moox\Core\Traits\HasStatusColors;
 use Moox\Core\Traits\Tabs\HasResourceTabs;
 use Moox\Draft\Enums\TranslationStatus;
+use Moox\Localization\Models\Localization;
 
 class BaseDraftResource extends BaseResource
 {
@@ -186,34 +187,43 @@ class BaseDraftResource extends BaseResource
         return TextColumn::make('title')
             ->label('Title')
             ->searchable(true, function ($query, $search, $livewire) {
-                $currentLang = $livewire->lang;
+                $currentLang = static::resolveCurrentLang($livewire);
                 $query->whereHas('translations', function ($query) use ($search, $currentLang) {
                     $query->where('locale', $currentLang)
                         ->where('title', 'like', '%'.$search.'%');
                 });
             })
-            ->sortable()
-            ->extraAttributes(fn ($record) => [
-                'style' => $record->translations()->where('locale', request()->get('lang', app()->getLocale()))->withTrashed()->whereNotNull('title')->exists()
-                    ? ''
-                    : 'color: var(--gray-500);',
-            ])
+            // ->sortable()
+            ->extraAttributes(function ($record, $livewire) {
+                $currentLang = static::resolveCurrentLang($livewire);
+
+                return [
+                    'style' => $record->translations()->where('locale', $currentLang)->withTrashed()->whereNotNull('title')->exists()
+                        ? ''
+                        : 'color: var(--gray-500);',
+                ];
+            })
             ->getStateUsing(function ($record, $livewire) {
-                $currentLang = $livewire->lang;
+                $currentLang = static::resolveCurrentLang($livewire);
 
                 $translation = $record->translations()->withTrashed()->where('locale', $currentLang)->first();
-
                 if ($translation && $translation->title) {
                     return $translation->title;
                 }
-
-                $fallbackTranslation = $record->translations()->where('locale', app()->getLocale())->first();
+                $defaultLocalization = Localization::where('is_default', true)->first();
+                $defaultLang = $defaultLocalization->locale_variant ?? app()->getLocale();
+                $fallbackTranslation = $record->translations()->where('locale', $defaultLang)->first();
 
                 if ($fallbackTranslation && $fallbackTranslation->title) {
-                    return $fallbackTranslation->title.' ('.app()->getLocale().')';
+                    return $fallbackTranslation->title.' ('.$defaultLang.')';
                 }
 
-                return 'No title available';
+                $anyTranslation = $record->translations()->whereNotNull('title')->first();
+                if ($anyTranslation && $anyTranslation->title) {
+                    return $anyTranslation->title.' ('.$anyTranslation->locale.')';
+                }
+
+                return __('core::core.no_title_available');
             });
     }
 
@@ -221,14 +231,20 @@ class BaseDraftResource extends BaseResource
     {
         return TextColumn::make('slug')
             ->label('Slug')
-            ->searchable(true, function ($query, $search) {
-                $currentLang = request()->get('lang', app()->getLocale());
+            ->searchable(true, function ($query, $search, $livewire) {
+                $currentLang = static::resolveCurrentLang($livewire);
                 $query->whereHas('translations', function ($query) use ($search, $currentLang) {
                     $query->where('locale', $currentLang)
                         ->where('slug', 'like', '%'.$search.'%');
                 });
             })
-            ->sortable();
+            // ->sortable()
+            ->getStateUsing(function ($record, $livewire) {
+                $currentLang = static::resolveCurrentLang($livewire);
+                $translation = $record->translations()->withTrashed()->where('locale', $currentLang)->first();
+
+                return $translation->slug ?? '';
+            });
     }
 
     public static function getTranslationStatusSelect(): Select
@@ -269,7 +285,7 @@ class BaseDraftResource extends BaseResource
             return TranslationStatus::DELETED->value;
         }
 
-        return $translation->translation_status?->value ?? TranslationStatus::DRAFT->value;
+        return $translation->translation_status->value ?? TranslationStatus::DRAFT->value;
     }
 
     protected static function getDefaultStatus(): string
@@ -331,7 +347,8 @@ class BaseDraftResource extends BaseResource
         return TextEntry::make('published_at')
             ->label(__('core::core.published_at'))
             ->state(function ($record): string {
-                $translation = $record->translations()->withTrashed()->first();
+                $locale = request()->query('lang') ?? app()->getLocale();
+                $translation = $record->translations()->withTrashed()->where('locale', $locale)->first();
                 if (! $translation || ! $translation->published_at) {
                     return '';
                 }
@@ -344,7 +361,12 @@ class BaseDraftResource extends BaseResource
 
                 return $translation->published_at.' - '.$translation->published_at->diffForHumans().$publishedBy;
             })
-            ->hidden(fn ($record) => ! $record->published_at);
+            ->hidden(function ($record): bool {
+                $locale = request()->query('lang') ?? app()->getLocale();
+                $translation = $record->translations()->withTrashed()->where('locale', $locale)->first();
+
+                return ! $translation || ! $translation->published_at;
+            });
     }
 
     /**
@@ -381,7 +403,9 @@ class BaseDraftResource extends BaseResource
                 return $query->when(
                     $data['value'] ?? null,
                     function (Builder $query, $value): Builder {
-                        $currentLang = request()->query('lang') ?? request()->get('lang') ?? app()->getLocale();
+                        $defaultLocalization = Localization::where('is_default', true)->first();
+                        $defaultLang = $defaultLocalization->locale_variant ?? app()->getLocale();
+                        $currentLang = request()->query('lang') ?? request()->get('lang') ?? $defaultLang;
 
                         if (! $value) {
                             return $query;
@@ -394,8 +418,8 @@ class BaseDraftResource extends BaseResource
                         }
 
                         if ($value === 'deleted') {
-                            return $query->whereHas('translations', function ($query) use ($currentLang) {
-                                $query->where('locale', $currentLang)
+                            return $query->whereHas('translations', function ($translationQuery) use ($currentLang) {
+                                $translationQuery->where('locale', $currentLang)
                                     ->where('translation_status', 'deleted')
                                     ->withTrashed();
                             });
@@ -404,6 +428,33 @@ class BaseDraftResource extends BaseResource
                         return $query->whereHas('translations', function ($query) use ($value, $currentLang) {
                             $query->where('locale', $currentLang)
                                 ->where('translation_status', $value);
+                        });
+                    }
+                );
+            });
+    }
+
+    public static function getLocaleFilter(): SelectFilter
+    {
+        return SelectFilter::make('locale')
+            ->label(__('localization::fields.language'))
+            ->options(function () {
+                $localizations = Localization::where('is_active_admin', true)
+                    ->with('language')
+                    ->orderBy('language_id')
+                    ->orderBy('locale_variant')
+                    ->get();
+
+                return $localizations->mapWithKeys(function ($localization) {
+                    return [$localization->locale_variant => $localization->display_name];
+                })->toArray();
+            })
+            ->query(function (Builder $query, array $data): Builder {
+                return $query->when(
+                    $data['value'] ?? null,
+                    function (Builder $query, $value): Builder {
+                        return $query->whereHas('translations', function ($query) use ($value) {
+                            $query->where('locale', $value);
                         });
                     }
                 );
@@ -432,8 +483,8 @@ class BaseDraftResource extends BaseResource
 
                 return static::getStatusColor(strtolower($value));
             })
-            ->getStateUsing(function ($record) {
-                $currentLang = request()->get('lang', app()->getLocale());
+            ->getStateUsing(function ($record, $livewire) {
+                $currentLang = static::resolveCurrentLang($livewire);
 
                 $translation = $record->translations()->withTrashed()->where('locale', $currentLang)->first();
 
@@ -447,5 +498,29 @@ class BaseDraftResource extends BaseResource
 
                 return $translation->translation_status ?? TranslationStatus::DRAFT;
             });
+    }
+
+    protected static function resolveCurrentLang($livewire = null): string
+    {
+        // 1) Livewire property on page/resource (e.g., forms)
+        if ($livewire && property_exists($livewire, 'lang') && $livewire->lang) {
+            return $livewire->lang;
+        }
+
+        // 2) Filament table filter value for locale, if present
+        if ($livewire && property_exists($livewire, 'tableFilters') && ! empty($livewire->tableFilters['locale']['value'] ?? null)) {
+            return (string) $livewire->tableFilters['locale']['value'];
+        }
+
+        // 3) Request parameter 'lang' (URL switcher)
+        $requestLang = request()->query('lang') ?? request()->get('lang');
+        if ($requestLang) {
+            return (string) $requestLang;
+        }
+
+        // 4) Fallback to configured default localization or app locale
+        $defaultLocalization = Localization::where('is_default', true)->first();
+
+        return $defaultLocalization->locale_variant ?? app()->getLocale();
     }
 }

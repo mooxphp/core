@@ -8,6 +8,7 @@ use Filament\Actions\EditAction;
 use Filament\Actions\RestoreAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\MorphToSelect;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
@@ -18,8 +19,8 @@ use Filament\Resources\Resource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\DB;
 use Moox\Clipboard\Forms\Components\CopyableField;
-use Moox\User\Models\User;
 
 abstract class BaseResource extends Resource
 {
@@ -64,7 +65,7 @@ abstract class BaseResource extends Resource
         $model = static::getModel();
 
         if (in_array(SoftDeletes::class, class_uses_recursive($model))) {
-            $query = $model::withTrashed();
+            $query = $model::query()->withoutGlobalScope(SoftDeletingScope::class);
         } else {
             $query = method_exists(parent::class, 'getTableQuery')
                 ? parent::getTableQuery()
@@ -179,10 +180,10 @@ abstract class BaseResource extends Resource
         return RestoreAction::make('restore')
             ->label(__('core::core.restore'))
             ->color('success')
-            ->action(function ($record, $livewire) {
+            ->action(function (\Illuminate\Database\Eloquent\Model $record, $livewire) {
                 if (method_exists($record, 'translations')) {
-                    \DB::table($record->getTable())
-                        ->where('id', $record->id)
+                    DB::table($record->getTable())
+                        ->where($record->getKeyName(), $record->getKey())
                         ->update(['deleted_at' => null]);
 
                     $translations = $record->translations()->withTrashed()->get();
@@ -203,7 +204,7 @@ abstract class BaseResource extends Resource
                     if (method_exists($record, 'restore')) {
                         if (auth()->check()) {
                             if (property_exists($record, 'restored_at') || $record->isFillable('restored_at')) {
-                                $record->restored_at = now();
+                                $record->setAttribute('restored_at', now());
                             }
                             if (method_exists($record, 'restoredBy')) {
                                 $record->restoredBy()->associate(auth()->user());
@@ -226,11 +227,12 @@ abstract class BaseResource extends Resource
     {
         return RestoreBulkAction::make()
             ->visible(fn ($livewire): bool => isset($livewire->activeTab) && in_array($livewire->activeTab, ['trash', 'deleted']))
-            ->action(function ($records, $livewire): void {
+            ->action(function (array $records, $livewire): void {
+                /** @var \Illuminate\Database\Eloquent\Model $record */
                 foreach ($records as $record) {
                     if (method_exists($record, 'translations')) {
-                        \DB::table($record->getTable())
-                            ->where('id', $record->id)
+                        DB::table($record->getTable())
+                            ->where($record->getKeyName(), $record->getKey())
                             ->update(['deleted_at' => null]);
 
                         $translations = $record->translations()->withTrashed()->get();
@@ -251,7 +253,7 @@ abstract class BaseResource extends Resource
                         if (method_exists($record, 'restore')) {
                             if (auth()->check()) {
                                 if (property_exists($record, 'restored_at') || $record->isFillable('restored_at')) {
-                                    $record->restored_at = now();
+                                    $record->setAttribute('restored_at', now());
                                 }
                                 if (method_exists($record, 'restoredBy')) {
                                     $record->restoredBy()->associate(auth()->user());
@@ -322,8 +324,8 @@ abstract class BaseResource extends Resource
                         } else {
                             if (method_exists($record, 'trashed')) {
                                 $hasSoftDeletes = true;
-                                if (auth()->check()) {
-                                    $record->deletedBy()->associate(auth()->user());
+                                if (auth()->check() && is_object($record)) {
+                                    $record->setAttribute('deleted_by_id', auth()->id());
                                     $record->save();
                                 }
                             }
@@ -379,12 +381,55 @@ abstract class BaseResource extends Resource
             ->label(__('core::core.publish'))
             ->keyBindings(['command+p', 'ctrl+p'])
             ->color('secondary')
-            ->action(function ($livewire): void {
+            ->form(function ($livewire) {
+                if ($livewire->record && method_exists($livewire->record, 'translations')) {
+                    $config = config('core.draft_publish_logic', [
+                        'auto_publish_single' => true,
+                        'prompt_when_all_published' => true,
+                        'prompt_when_any_published' => false,
+                    ]);
+
+                    $allTranslations = $livewire->record->translations()->get();
+                    $translationCount = $allTranslations->count();
+
+                    if ($translationCount > 1) {
+                        $currentLocale = $livewire->lang ?? app()->getLocale();
+                        $publishedCount = $allTranslations->where('translation_status', 'published')->count();
+
+                        $currentTranslation = $allTranslations->where('locale', $currentLocale)->first();
+                        if ($currentTranslation && $currentTranslation->translation_status !== 'published') {
+                            $publishedCount++; // This one will be published
+                        }
+
+                        $shouldAsk = false;
+
+                        if ($config['prompt_when_all_published'] && $publishedCount === $translationCount && is_object($livewire->record) && $livewire->record->status !== 'published') {
+                            $shouldAsk = true;
+                        }
+
+                        if ($config['prompt_when_any_published'] && $publishedCount > 0 && is_object($livewire->record) && $livewire->record->status !== 'published') {
+                            $shouldAsk = true;
+                        }
+
+                        if ($shouldAsk) {
+                            return [
+                                Checkbox::make('publish_main_entry')
+                                    ->label(__('core::core.publish_main_entry'))
+                                    ->helperText(__('core::core.publish_main_entry_description'))
+                                    ->default(true),
+                            ];
+                        }
+                    }
+                }
+
+                return [];
+            })
+            ->action(function ($livewire, array $data): void {
                 $livewire->data['translation_status'] = 'published';
                 $livewire->save();
 
                 if (method_exists($livewire->record, 'translateOrNew')) {
-                    $locale = app()->getLocale();
+                    $locale = $livewire->lang ?? app()->getLocale();
                     $translation = $livewire->record->translateOrNew($locale);
                     $translation->published_at = now();
                     $translation->publishedBy()->associate(auth()->user());
@@ -394,7 +439,16 @@ abstract class BaseResource extends Resource
                     $translation->save();
                 }
 
-                $livewire->redirect(static::getUrl('view', ['record' => $livewire->record]));
+                if (isset($data['publish_main_entry']) && $data['publish_main_entry'] && $livewire->record) {
+                    $livewire->record->status = 'published';
+                    $livewire->record->save();
+                }
+
+                $url = static::getUrl('view', ['record' => $livewire->record]);
+                if (isset($livewire->lang)) {
+                    $url .= '?lang='.$livewire->lang;
+                }
+                $livewire->redirect($url);
             })
             ->visible(fn ($livewire): bool => $livewire instanceof EditRecord)
             ->hidden(fn ($get, $livewire) => $get('translation_status') === 'published'
@@ -414,7 +468,12 @@ abstract class BaseResource extends Resource
             ->button()
             ->action(function ($livewire): void {
                 $livewire instanceof CreateRecord ? $livewire->create() : $livewire->save();
-                $livewire->redirect(static::getUrl('create'));
+
+                $url = static::getUrl('create');
+                if (isset($livewire->lang)) {
+                    $url .= '?lang='.$livewire->lang;
+                }
+                $livewire->redirect($url);
             })
             ->visible(fn ($livewire): bool => $livewire instanceof CreateRecord);
     }
@@ -478,9 +537,13 @@ abstract class BaseResource extends Resource
                     $translation = $livewire->record->translations()->withTrashed()->where('locale', $currentLang)->first();
 
                     if ($translation && $translation->trashed()) {
-                        $translation->forceDelete();
+                        $remainingTranslations = $livewire->record->translations()->withTrashed()->where('locale', '!=', $currentLang)->count();
 
-                        $livewire->record->checkAndDeleteIfAllTranslationsDeleted();
+                        if ($remainingTranslations === 0 && is_object($livewire->record)) {
+                            $livewire->record->forceDelete();
+                        } else {
+                            $translation->forceDelete();
+                        }
 
                         Notification::make()
                             ->title(__('core::core.record_permanently_deleted'))
@@ -493,7 +556,7 @@ abstract class BaseResource extends Resource
                     }
                 }
 
-                if ($livewire->record && method_exists($livewire->record, 'trashed') && $livewire->record->trashed()) {
+                if (is_object($livewire->record) && method_exists($livewire->record, 'trashed') && $livewire->record->trashed()) {
                     $livewire->record->forceDelete();
 
                     Notification::make()
@@ -525,7 +588,9 @@ abstract class BaseResource extends Resource
                         }
                         $translation->delete();
 
-                        $livewire->record->checkAndDeleteIfAllTranslationsDeleted();
+                        if (is_object($livewire->record)) {
+                            $livewire->record->checkAndDeleteIfAllTranslationsDeleted();
+                        }
 
                         Notification::make()
                             ->title(__('core::core.record_moved_to_trash'))
@@ -536,19 +601,23 @@ abstract class BaseResource extends Resource
                     }
                 } else {
                     if (method_exists($livewire->record, 'trashed')) {
-                        if (auth()->check()) {
+                        if (auth()->check() && is_object($livewire->record)) {
                             $livewire->record->deletedBy()->associate(auth()->user());
                             $livewire->record->save();
                         }
 
-                        $livewire->record->delete();
+                        if (is_object($livewire->record)) {
+                            $livewire->record->delete();
+                        }
 
                         Notification::make()
                             ->title(__('core::core.record_moved_to_trash'))
                             ->success()
                             ->send();
                     } else {
-                        $livewire->record->delete();
+                        if (is_object($livewire->record)) {
+                            $livewire->record->delete();
+                        }
 
                         Notification::make()
                             ->title(__('core::core.deleted'))
@@ -644,24 +713,26 @@ abstract class BaseResource extends Resource
                         }
                         $translation->restore();
 
-                        $isMainModelTrashed = \DB::table($record->getTable())
-                            ->where('id', $record->id)
-                            ->whereNotNull('deleted_at')
-                            ->exists();
-
-                        if ($isMainModelTrashed) {
-                            \DB::table($record->getTable())
+                        if (is_object($record)) {
+                            $isMainModelTrashed = DB::table($record->getTable())
                                 ->where('id', $record->id)
-                                ->update(['deleted_at' => null]);
+                                ->whereNotNull('deleted_at')
+                                ->exists();
+
+                            if ($isMainModelTrashed) {
+                                DB::table($record->getTable())
+                                    ->where('id', $record->id)
+                                    ->update(['deleted_at' => null]);
+                            }
                         }
 
                         $livewire->redirect(static::getUrl('index'));
                     }
                 } else {
                     if (method_exists($record, 'restore')) {
-                        if (auth()->check()) {
+                        if (auth()->check() && is_object($record)) {
                             if (property_exists($record, 'restored_at') || $record->isFillable('restored_at')) {
-                                $record->restored_at = now();
+                                $record->setAttribute('restored_at', now());
                             }
                             if (method_exists($record, 'restoredBy')) {
                                 $record->restoredBy()->associate(auth()->user());
@@ -671,7 +742,9 @@ abstract class BaseResource extends Resource
                             }
                         }
 
-                        $record->restore();
+                        if (is_object($record)) {
+                            $record->restore();
+                        }
                     }
                     $livewire->redirect(static::getUrl('index'));
                 }
